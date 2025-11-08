@@ -161,9 +161,41 @@ class AsyncObjectStorage:
         read_file = os.fdopen(read_fd, "rb")
         write_file = os.fdopen(write_fd, "wb")
 
+        debug_tar_uploads = os.getenv("DAYTONA_DEBUG_TAR_UPLOADS", "").strip().lower() in {
+            "1",
+            "true",
+            "yes",
+        }
+
+        def _log_tarinfo(tarinfo: tarfile.TarInfo) -> tarfile.TarInfo:
+            if not debug_tar_uploads:
+                return tarinfo
+
+            local_path = source_path
+            if os.path.isdir(source_path):
+                if tarinfo.name == archive_base_path:
+                    local_path = source_path
+                else:
+                    relative_name = tarinfo.name
+                    if archive_base_path and tarinfo.name.startswith(f"{archive_base_path}/"):
+                        relative_name = tarinfo.name[len(archive_base_path) + 1 :]
+                    relative_name = relative_name.lstrip("/\\")
+                    local_path = os.path.join(source_path, relative_name) if relative_name else source_path
+
+            try:
+                local_size = os.path.getsize(local_path)
+            except OSError:
+                local_size = None
+
+            print(
+                f"[daytona-debug] archiving {tarinfo.name} tar_size={tarinfo.size} local_size={local_size}",
+                flush=True,
+            )
+            return tarinfo
+
         def tar_worker():
             with tarfile.open(fileobj=write_file, mode="w|") as tar:
-                tar.add(source_path, arcname=archive_base_path)
+                tar.add(source_path, arcname=archive_base_path, filter=_log_tarinfo)
             write_file.close()
 
         thread = threading.Thread(target=tar_worker, daemon=True)
